@@ -97,7 +97,7 @@ components:
 paths:
   /databases/:
     post: 
-      summary: Adds a database
+      summary: Adds a database component
       requestBody:
         content:
           application/json:
@@ -120,14 +120,14 @@ paths:
         '500':
           description: Internal error
 
-  /databases/{databaseId}:
+  /databases/{id}:
     put: 
-      summary: Updates the attributes for an existing database
+      summary: Updates the attributes for an existing database component
       parameters:
-        - name: databaseId
+        - name: id
           in: path
           required: true
-          description: UUID to identify a given database
+          description: UUID to identify a given database component
           schema:
             $ref: '#/components/schemas/UUID' 
       requestBody:
@@ -154,12 +154,12 @@ paths:
         '500':
           description: Internal error   
     get:
-      summary: Returns the details of a given database
+      summary: Returns the details of a given database component
       parameters:
-        - name: databaseId
+        - name: id
           in: path
           required: true
-          description: UUID to identify a given database
+          description: UUID to identify a given database component
           schema:
             $ref: '#/components/schemas/UUID'
       responses:
