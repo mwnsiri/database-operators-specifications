@@ -1,12 +1,242 @@
 openapi: '3.0.2'
 info:
-  title: Specifications for the services provided by Charmed database operators 
+  title: Specifications for the charmed database operators
   version: '1.0'
-servers:
-  - url: https://api.server.test/v1
+
+components:
+  schemas:
+    UUID:
+      type: string
+      minLength: 22
+      maxLength: 22
+
+    SizeInMB:
+      type: integer
+      minimum: 0
+      maximum: 67108864 # = 64 TB
+
+    Service:
+      type: string
+      enum: ["DATA", "QUERY"]
+
+    Relation: 
+      type: object
+      properties:
+        kind: 
+          type: string
+          enum: ["REPLICA_FOR", "SHARD_FOR", "INSTANCE_FOR", "PROXY_FOR"]
+        relatedObjectId:
+          $ref: '#/components/schemas/UUID'
+
+    StorageAllocation:
+      type: object
+      properties:
+        sizeInMB:
+          $ref: '#/components/schemas/SizeInMB'
+        provisionedIOsPerSecond:
+          type: integer
+        provisionedThroughputInMBPerSec:
+          type: integer
+        partOfDiskGroup:
+          type: string
+          #enum: ["CTRL", "LOGS", "TEMP", "DATA", "RECO"]
+          default: "CTRL"
+          description: Instruct the automation to either use an existing disk group or to create a new one
+        sku:
+          type: string
+      required:
+        - sizeInMB
+
+    DatabaseComponent:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/UUID'
+          readOnly: true
+        majorVersion:
+          type: integer
+        minorVersion:
+          type: integer
+        allocatedMemoryInMB:
+          $ref: '#/components/schemas/SizeInMB'
+        allocatedVirtualCores:
+          type: integer
+          minimum: 1
+          maximum: 256
+        allocatedStorage:
+          type: array
+          items: {
+            $ref: '#/components/schemas/StorageAllocation'
+          }
+          minItems: 1
+        services:
+          type: array
+          items: {
+            $ref: '#/components/schemas/Service'
+          }
+          minItems: 1
+        relations:
+          type: array
+          items: {
+            $ref: '#/components/schemas/Relation'
+          }
+        errorCode:
+          type: string
+          readOnly: true
+      required:
+        - id
+        - majorVersion
+        - services
+
+    DatabaseComponents:
+      type: array
+      items: {
+        $ref: '#/components/schemas/DatabaseComponent'
+      }
+ 
 paths:
-  /users:
-    get:
+  /databases/:
+    post: 
+      summary: Adds a database
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatabaseComponent'     
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseComponent'
+        '400':
+          description: Bad request 
+          # Can be returned as well when the user do not have permission (instead of 403) 
+        '401':
+          description: Unauthenticated user
+        '407':
+          description: Proxy based authentication failed
+        '500':
+          description: Internal error
+
+  /databases/{databaseId}:
+    put: 
+      summary: Updates the attributes for an existing database
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          description: UUID to identify a given database
+          schema:
+            $ref: '#/components/schemas/UUID' 
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatabaseComponent'     
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseComponent'
+        '204':
+          description: No resource found with the provided identifier
+        '400':
+          description: Bad request 
+          # Can be returned as well when the user do not have permission (instead of 403) 
+        '401':
+          description: Unauthenticated user
+        '407':
+          description: Proxy based authentication failed
+        '500':
+          description: Internal error   
+    get:
+      summary: Returns the details of a given database
+      parameters:
+        - name: databaseId
+          in: path
+          required: true
+          description: UUID to identify a given database
+          schema:
+            $ref: '#/components/schemas/UUID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseComponent'
+        '204':
+          description: No resource found with the provided identifier
+        '400':
+          description: Bad request 
+          # Can be returned as well when the user do not have permission (instead of 403) 
+        '401':
+          description: Unauthenticated user
+        '407':
+          description: Proxy based authentication failed
+        '500':
+          description: Internal error   
+
+  /replicated-databases/{replicatedDBId}:
+    get: 
+      summary: Returns a list of databases belonging to a replicated database
+      parameters:
+        - name: replicatedDBId
+          in: path
+          required: true
+          description: UUID to identify a given sharded database
+          schema:
+            $ref: '#/components/schemas/UUID'
+      responses:
+        '200':
+          description: OK  
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseComponents'
+        '204':
+          description: No resource found with the provided identifier
+        '400':
+          description: Bad request 
+          # Can be returned as well when the user do not have permission (instead of 403) 
+        '401':
+          description: Unauthenticated user
+        '407':
+          description: Proxy based authentication failed
+        '500':
+          description: Internal error   
+
+  /sharded-databases/{shardedDBId}:
+    get: 
+      summary: Returns a list of databases belonging to a sharded database
+      parameters:
+        - name: shardedDBId
+          in: path
+          required: true
+          description: UUID to identify a given sharded database
+          schema:
+            $ref: '#/components/schemas/UUID'
+      responses:
+        '200':
+          description: OK 
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseComponents'
+        '204':
+          description: No resource found with the provided identifier
+        '400':
+          description: Bad request 
+          # Can be returned as well when the user do not have permission (instead of 403) 
+        '401':
+          description: Unauthenticated user
+        '407':
+          description: Proxy based authentication failed
+        '500':
+          description: Internal error   
+
+
