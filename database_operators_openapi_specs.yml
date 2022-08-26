@@ -1,4 +1,4 @@
-openapi: '3.0.2'
+openapi: '3.0.3'
 info:
   title: Specifications for the charmed database operators
   version: '1.0'
@@ -9,43 +9,279 @@ components:
       type: string
       minLength: 22
       maxLength: 22
+      description: UUID in base64
 
     SizeInMB:
       type: integer
       minimum: 1
       maximum: 67108864 # = 64 TB
 
+    DatabaseSolution:
+      type: string
+      enum:
+        - redis
+        - mysql
+        - mongodb
+        - postgres
+        - sqlserver 
+        - opensearch 
+
     Service:
       type: string
       enum: ["DATA", "QUERY"]
+
+    DayOfWeek: 
+      type: integer
+      minimum: 0
+      maximum: 6
+
+    DayOfMonth: 
+      type: integer
+      minimum: 1
+      maximum: 31
+
+    Month: 
+      type: integer
+      minimum: 1
+      maximum: 12
+
+    Schedule: 
+      type: object
+      description: |
+        This object presents a schedule as defined by linux crontab https://crontab.guru/#5_0_*_*_1,3,6
+        TimeZone is always assumed to be UTC
+      properties:
+        minutes:
+          type: integer
+          minimum: 0
+          maximum: 59
+        hours:
+          type: integer
+          minimum: 0
+          maximum: 23
+        daysOfMonth:
+          type: array 
+          items: {
+            $ref: '#/components/schemas/DayOfMonth'
+          }
+          maxItems: 31
+        months: 
+          type: array 
+          items: {
+            $ref: '#/components/schemas/Month'
+          }
+          maxItems: 12
+        daysOfWeek:
+          type: array 
+          items: {
+            $ref: '#/components/schemas/DayOfWeek'
+          }
+          maxItems: 6
 
     Relation: 
       type: object
       properties:
         kind: 
           type: string
-          enum: ["REPLICA_FOR", "SHARD_FOR", "INSTANCE_FOR", "PROXY_FOR"]
+          enum: ["REPLICA", "SHARD", "INSTANCE", "PROXY"]
         relatedObjectId:
           $ref: '#/components/schemas/UUID'
+      required:
+        - kind
+        - relatedObjectId
 
-    StorageAllocation:
+    BlockStorageAllocation:
       type: object
-      properties:
+      properties: 
         sizeInMB:
           $ref: '#/components/schemas/SizeInMB'
         provisionedIOsPerSecond:
           type: integer
         provisionedThroughputInMBPerSec:
           type: integer
-        partOfDiskGroup:
-          type: string
-          #enum: ["CTRL", "LOGS", "TEMP", "DATA", "RECO"]
-          default: "CTRL"
-          description: Instruct the automation to either use an existing disk group or to create a new one
-        sku:
-          type: string
       required:
         - sizeInMB
+
+    ObjectStorageAllocation:
+      type: object
+      properties: 
+        endPoint:
+          type: string
+        container:
+          type: string
+          description : Can refer to an S3 bucket or BlobStore container
+        accessKey:
+          type: string 
+          description: Will be integrated with juju secrets in the future
+        secretKey:
+          type: string
+          description: Will be integrated with juju secrets in the future
+      required:
+        - endPoint
+        - container
+        - accessKey
+        #- secretKey: Not needed for Azure BlobStore
+
+    StorageAllocation: 
+      allOf:
+        - oneOf:
+          - $ref: '#/components/schemas/BlockStorageAllocation'
+          - $ref: '#/components/schemas/ObjectStorageAllocation'
+        - type: object
+          properties:
+            storageType:
+              type: string
+              enum:
+                - BLOCK
+                - OBJECT 
+                - FILE
+            provider: 
+              type: string
+              # enum [EBS, EFS, S3 ...]
+            sku:
+              type: string
+            poolName: 
+              type: string
+              description: Instruct the automation to either reuse an existing pool or create a new one
+          required:
+            - poolName
+
+    BackupType:
+      type: string
+      enum:
+        - FULL
+        - DIFFERENTIAL
+        - INCREMENTAL          
+
+    BackupConfig:
+      type: object
+      properties: 
+        #backedUpData:
+        #  type: string 
+        #  description: | 
+        #    Can refer to data types: [DATA, LOGS]
+        #    Or can refer to whole filesystems like: "/data/<dbcode>"
+        #    Does not make sense to have FULL backup for LOGS. Is there a[n easy] way to enforce the latter at schema level ?
+        #  For now, we will remove the field
+        compression: 
+          type: boolean
+          default: true
+        compressionAlgorithm:
+          type: string
+          #enum: [lz4, bzip2 ...]
+        compressionParalellism:
+          type: integer
+          minimum: 1
+          maximum: 256
+        encryption:
+          type: boolean
+          default: false
+        encryptionKey:
+          type: string
+          writeOnly: true
+          description: Will be integrated with juju secrets
+        encryptionParallelism:
+          type: integer
+          minimum : 1
+          maximum : 256
+          
+    BackupRetentionConfig:
+      type: object
+      properties:
+        pitrRecoveryWindowInDays:
+          type: integer
+          minimum: 1
+          maximum: 99
+        numberOfFullBackupsToKeep:
+          type: integer
+          minimum: 1
+          maximum: 9999
+      anyOf:
+        - required: [pitrRecoveryWindowInDays]
+        - required: [numberOfFullBackupsToKeep]
+
+    BackupPlanTask:
+      type: object
+      properties:
+        backupType:
+          $ref: '#/components/schemas/BackupType'
+        backupSchedule:
+          $ref: '#/components/schemas/Schedule'
+      required:
+        - BackupType
+        - backupSchedule
+    
+    BackupPlan: 
+      type: object
+      properties: 
+        id:
+          $ref: '#/components/schemas/UUID'
+          readOnly: true
+        backupConfig: 
+          $ref: '#/components/schemas/BackupConfig'
+        backupStorage:
+          $ref: '#/components/schemas/StorageAllocation'
+        backupRetentionConfig :
+           $ref: '#/components/schemas/BackupRetentionConfig'
+        backupTasks:
+          type: array
+          items: {
+            $ref: '#/components/schemas/BackupPlanTask'
+          } 
+          minItems: 1
+
+    Backup: 
+      type: object
+      properties: 
+        id:
+          $ref: '#/components/schemas/UUID'
+          readOnly: true
+        backedUpObjectId:
+          $ref: '#/components/schemas/UUID'
+          readOnly: true
+        backupType: 
+          $ref: '#/components/schemas/BackupType'
+        started:
+          type: string
+          description: JavaScript format is expected "2022-04-23T18:25:43.511Z"
+          readOnly: true
+        finished: 
+          type: string
+          description: JavaScript format is expected "2022-04-23T18:25:43.511Z"
+          readOnly: true
+        usedBackupDir:
+          type: string
+          description: Directory where backup is stored if applicable
+        usedConfig: 
+          $ref: '#/components/schemas/BackupConfig'
+        usedStorage:
+          $ref: '#/components/schemas/StorageAllocation'
+        #triggerMode:
+        #  type: string
+        #  enum: [MANUAL, AUTOMATIC]
+        #  readOnly: true
+        # Too early/Not needed for now
+        #triggeredBy:
+        #  type: string
+        #  description : can refer to the BackupPlanId or to the user identifier
+        #  readOnly: true
+        # Too early/Not needed for now
+        status:
+          type: string
+          enum:
+            - STARTED 
+            - CANCELED
+            - FAILED
+            - FINISHED
+      required:
+        - id 
+        - backedUpObjectId
+        - backupType
+        - started
+        - usedBackupDir
+        - usedConfig
+        - usedStorage
+        - status
 
     DatabaseComponent:
       type: object
@@ -53,9 +289,12 @@ components:
         id:
           $ref: '#/components/schemas/UUID'
           readOnly: true
-        majorVersion:
+        name:
+          type: string
+        schemaVersion:
           type: integer
-        minorVersion:
+          default: 0
+        componentVersion:
           type: integer
         allocatedMemoryInMB:
           $ref: '#/components/schemas/SizeInMB'
@@ -80,24 +319,56 @@ components:
           items: {
             $ref: '#/components/schemas/Relation'
           }
+        #associatedActiveBackupPlanId:
+        #  $ref: '#/components/schemas/UUID'
+        # Not needed for now
+        backups: 
+          type: array 
+          items : {
+            $ref: '#/components/schemas/Backup'
+          }
+          readOnly: true
         errorCode:
           type: string
           readOnly: true
       required:
         - id
-        - majorVersion
+        - name
+        - componentVersion
         - services
-
-    DatabaseComponents:
-      type: array
-      items: {
-        $ref: '#/components/schemas/DatabaseComponent'
-      }
  
 paths:
-  /databases/:
+  /{solution}/database-components/:
+    parameters:
+        - name: solution
+          in: path
+          required: true
+          description: Name of the database product to use
+          schema:
+            $ref: '#/components/schemas/DatabaseSolution'
     post: 
-      summary: Adds a database component
+      summary: Adds a database component  
+      description: |
+        # Juju commands: 
+        ## Allocate storage pools
+        _For every defined __StorageAllocation__ element, run:_
+
+        > juju create-storage-pool __\<StorageAllocation.poolName>__ __\<StorageAllocation.provider>__ volume-type=__\<StorageAllocation.sku>__ iops=__\<StorageAllocation.provisionedIOsPerSecond>__*1024/__\<StorageAllocation.sizeInMB>__
+
+        _An example would be_
+
+        > juju create-storage-pool __data__ __ebs__ volume-type=__provisioned-iops__ iops=__100__ 
+
+        ## Deploy the database component
+        >juju deploy __\<solution>__ --constraints "mem=__\<allocatedMemoryInMB>__ cores=__\<allocatedVirtualCores>__/2" --revision=__\<componentVersion>__ --storage mysqldata=__\<StorageAllocation.poolName>__,__\<StorageAllocation.sizeInMB>__
+
+        _An example would be_
+
+        > juju deploy mysql --constraints "mem=__512__ cores=__2__" --revision __37__ --storage mysqldata=__data__,__1024__
+
+        ## Relate this component to the other ones referenced in this call 
+        _For every defined __Relation__ element, run:_
+        > juju relate __\<solution>__ __\<Relation.relatedObjectId.name>__:__\<Relation.type>__
       requestBody:
         content:
           application/json:
@@ -106,137 +377,194 @@ paths:
       responses:
         '201':
           description: OK
+        '400':
+          description: Bad request #which covers all 4xx errors
+        '500':
+          description: Internal error #which covers all 5xx errors    
+
+  /{solution}/database-components/{id}:
+    parameters:
+        - name: solution
+          in: path
+          required: true
+          description: Name of the database product to use
+          schema:
+            $ref: '#/components/schemas/DatabaseSolution'
+        - name: id
+          in: path
+          required: true
+          description: UUID to identify a given database component
+          schema:
+            $ref: '#/components/schemas/UUID'
+    get:
+      summary: Returns the details of a given database component
+      responses:
+        '200':
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DatabaseComponent'
+        '204':
+          description: No resource found with the provided identifier
         '400':
-          description: Bad request 
-          # Can be returned as well when the user do not have permission (instead of 403) 
-        '401':
-          description: Unauthenticated user
-        '407':
-          description: Proxy based authentication failed
+          description: Bad request #which covers all 4xx errors
         '500':
-          description: Internal error
+          description: Internal error #which covers all 5xx errors   
 
-  /databases/{id}:
-    put: 
-      summary: Updates the attributes for an existing database component
-      parameters:
+  /{solution}/database-components/{id}/backups:
+    parameters:
+        - name: solution
+          in: path
+          required: true
+          description: Name of the database product to use
+          schema:
+            $ref: '#/components/schemas/DatabaseSolution'
         - name: id
           in: path
           required: true
           description: UUID to identify a given database component
           schema:
             $ref: '#/components/schemas/UUID' 
+    post: 
+      summary: Starts an on-demand backup
+      description: |
+        # Juju commands
+        ### The target would be to have backup operations as standard juju commands that all charms should implement:
+        > juju create-backup -m __\<model>__ __\<solution>__[/__<unit-number>__]
+        
+        ### For now, backup operations will be exposed as specific charm actions:
+        > juju run-action __\<solution>__[/__<unit-number>__] __\<backup-command>__
+
+        ### In order to start a manual backup, we would need to perform the following operations
+        Only needed once
+
+        If re-run, it will affect the next backups
+        > juju run-action __\<solution>__[/__<unit-number>__] __configure-backup-storage__ storage-type=__\<StorageAllocation.storageType>__ provider=__\<StorageAllocation.provider>__ volume-type=__\<StorageAllocation.sku>__ endpoint=__\<StorageAllocation.endPoint>__ container=__|<StorageAllocation.container>__
+
+        > juju run-action __\<solution>__[/__<unit-number>__] __configure-backup-retention__ keep-latest=__\<BackupRetentionConfig.numberOfCopiesToKeep>__ delete-after=__\<BackupRetentionConfig.deleteAfter>__
+
+        > juju run-action __\<solution>__[/__<unit-number>__] __configure-backup__ compression=__\<BackupConfig.compression>__ encryption=__\<BackupConfig.encryption>__ ...
+
+        To be run every time a manual backup is needed
+
+        > juju run-action __\<solution>__[/__<unit-number>__] __create-backup__ type= __\<BackupType.backUpType>__ bakup_dir = __\<BackupType.usedBackupDir>__
+
+        _An example would be_
+
+        > juju run-action __mysql__ __configure-backup-storage__ storage-type=__OBJECT__  provider=__aws:s3__ volume-type=__Standard-IA__ endpoint=__com.amazonaws.region.s3__ container=__dbname__
+        
+        > juju run-action __mysql__ __configure-backup-retention__ keep-latest=__2__ 
+
+        > juju run-action __mysql__ __configure-backup__ compression=__true__ compressionParallelism=__3__
+
+        > juju run-action __mysql__ __create-backup__ type=__FULL__
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DatabaseComponent'     
+              $ref: '#/components/schemas/Backup'
+      responses:
+        '201':
+          description: OK
+        '400':
+          description: Bad request #which covers all 4xx errors
+        '500':
+          description: Internal error #which covers all 5xx errors   
+    head: 
+      summary: Returns the list of ids for the available backups related to this component
+      description: |
+        # Juju commands
+
+        > juju run-action __\<solution>__[/__<unit-number>__] __backups__ 
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DatabaseComponent'
+                type: array
+                items: {
+                  $ref: '#/components/schemas/UUID' 
+                }
+    get: 
+      summary: Returns the list of the available backups for this component
+      description: |
+        # Juju commands
+
+        > juju run-action __\<solution>__[/__<unit-number>__] __backups__ --verbose
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {
+                  $ref: '#/components/schemas/Backup' 
+                }
         '204':
           description: No resource found with the provided identifier
         '400':
-          description: Bad request 
-          # Can be returned as well when the user do not have permission (instead of 403) 
-        '401':
-          description: Unauthenticated user
-        '407':
-          description: Proxy based authentication failed
+          description: Bad request #which covers all 4xx errors
         '500':
-          description: Internal error   
-    get:
-      summary: Returns the details of a given database component
-      parameters:
+          description: Internal error #which covers all 5xx errors                    
+
+  /{solution}/database-components/{id}/backups/{backup-id}:
+    parameters:
+        - name: solution
+          in: path
+          required: true
+          description: Name of the database product to use
+          schema:
+            $ref: '#/components/schemas/DatabaseSolution'
         - name: id
           in: path
           required: true
           description: UUID to identify a given database component
           schema:
             $ref: '#/components/schemas/UUID'
+        - name: backup-id
+          in: path
+          required: true
+          description: Id to identify a given backup
+          schema:
+            $ref: '#/components/schemas/UUID'
+    get:
+      summary: Gets the details related to a specific backup
+      description: |
+        # Juju commands
+
+        > juju run-action __\<solution>__[/__<unit-number>__] __show-backup__ __\<backup-id>__
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DatabaseComponent'
+                $ref: '#/components/schemas/Backup'
         '204':
           description: No resource found with the provided identifier
         '400':
-          description: Bad request 
-          # Can be returned as well when the user do not have permission (instead of 403) 
-        '401':
-          description: Unauthenticated user
-        '407':
-          description: Proxy based authentication failed
+          description: Bad request #which covers all 4xx errors
         '500':
-          description: Internal error   
+          description: Internal error #which covers all 5xx errors     
 
-  /replicated-databases/{replicatedDBId}:
-    get: 
-      summary: Returns a list of databases belonging to a replicated database
-      parameters:
-        - name: replicatedDBId
-          in: path
-          required: true
-          description: UUID to identify a given sharded database
-          schema:
-            $ref: '#/components/schemas/UUID'
+  /backup-plans/:
+    post: 
+      summary: Adds a backup plan  
+      description: |
+        # Juju commands: 
+        ## 
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupPlan'
       responses:
-        '200':
-          description: OK  
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseComponents'
-        '204':
-          description: No resource found with the provided identifier
+        '201':
+          description: OK
         '400':
-          description: Bad request 
-          # Can be returned as well when the user do not have permission (instead of 403) 
-        '401':
-          description: Unauthenticated user
-        '407':
-          description: Proxy based authentication failed
+          description: Bad request #which covers all 4xx errors
         '500':
-          description: Internal error   
-
-  /sharded-databases/{shardedDBId}:
-    get: 
-      summary: Returns a list of databases belonging to a sharded database
-      parameters:
-        - name: shardedDBId
-          in: path
-          required: true
-          description: UUID to identify a given sharded database
-          schema:
-            $ref: '#/components/schemas/UUID'
-      responses:
-        '200':
-          description: OK 
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DatabaseComponents'
-        '204':
-          description: No resource found with the provided identifier
-        '400':
-          description: Bad request 
-          # Can be returned as well when the user do not have permission (instead of 403) 
-        '401':
-          description: Unauthenticated user
-        '407':
-          description: Proxy based authentication failed
-        '500':
-          description: Internal error   
-
-
+          description: Internal error #which covers all 5xx errors  
